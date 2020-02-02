@@ -5,6 +5,12 @@ import {spawn as nodeSpawn, SpawnOptionsWithoutStdio} from 'child_process';
 import {continueStatement} from '@babel/types';
 import * as fs from 'fs';
 
+import {
+  NotebookCellData,
+  NotebookRunFinishData,
+  NotebookPublishEvent,
+} from 'webview/webview-script';
+
 type NotebookID = string;
 type NotebookRunID = number;
 type NotebookInstance = {
@@ -200,23 +206,23 @@ function createNotebookDisplay(
   return panel;
 }
 
+function getNotebookContentWithPlaceholder(context: vscode.ExtensionContext) {
+  const webviewSourceFilePath = context.asAbsolutePath(
+    'webview/webview-source.html',
+  );
+  const scriptPath = vscode.Uri.file(
+    context.asAbsolutePath('out/webview-script.js'),
+  );
+  const html = fs.readFileSync(webviewSourceFilePath, 'utf8');
+  return {html, scriptPath};
+}
+
 function initializeNotebookDisplayWithHTML(
   displayWebview: vscode.Webview,
   {html, scriptPath}: NotebookDisplayTemplate,
 ) {
   const scriptUri = displayWebview.asWebviewUri(scriptPath);
-  displayWebview.html = html.replace('webview-script.js', scriptUri.toString());
-}
-
-function getNotebookContentWithPlaceholder(context: vscode.ExtensionContext) {
-  const webviewSourceFilePath = context.asAbsolutePath(
-    'src/webview-source.html',
-  );
-  const scriptPath = vscode.Uri.file(
-    context.asAbsolutePath('src/webview-script.js'),
-  );
-  const html = fs.readFileSync(webviewSourceFilePath, 'utf8');
-  return {html, scriptPath};
+  displayWebview.html = html.replace('webview-script.ts', scriptUri.toString());
 }
 
 function handleNotebookDisplayPanelClosing(
@@ -280,13 +286,6 @@ function registerOnCloseHandler(
   );
 }
 
-type NotebookPublishType =
-  | 'start'
-  | 'saving'
-  | 'updateCell'
-  | 'finished'
-  | 'error';
-
 async function compileAndRunNotebook(
   notebookInstance: NotebookInstance,
   notebookSource: vscode.TextDocument,
@@ -294,50 +293,55 @@ async function compileAndRunNotebook(
   notebookInstance.lastRunID = (notebookInstance.lastRunID ?? 0) + 1;
   const publish = getPublishForNotebookInstance(notebookInstance);
 
-  publish('start');
+  publish({type: 'start'});
   const [compiledNotebook, compilationError] = compileNotebook(notebookSource);
 
   if (compilationError != null) {
-    publish('error', {errorType: 'compilation', error: compilationError});
+    publish({
+      type: 'error',
+      data: {errorType: 'compilation', error: compilationError},
+    });
     return;
   }
 
   const compiledNotebookFileName = getCompiledNotebookFilename(
     notebookSource.fileName,
   );
-  publish('saving');
+  publish({type: 'saving'});
   const savingError = await saveCompiledNotebook(
     compiledNotebookFileName,
     compiledNotebook,
   );
   if (savingError != null) {
-    publish('error', {errorType: 'saving', error: savingError});
+    publish({type: 'error', data: {errorType: 'saving', error: savingError}});
   }
 
   runCompiledNotebook(compiledNotebookFileName, {
     onCellUpdate: data => {
       debugLog(data);
-      publish('updateCell', data);
+      publish({type: 'updateCell', data});
     },
     onOutputError: outputError => {
-      publish('error', {errorType: 'output', error: outputError});
+      publish({type: 'error', data: {errorType: 'output', error: outputError}});
     },
     onFinished: data => {
       debugLog(
         `[notebook] Run of \`${notebookInstance.id}\` finished with code \`${data.code}\``,
       );
-      publish('finished', data);
+      publish({type: 'finished', data});
     },
   });
 }
 
-function getPublishForNotebookInstance(notebookInstance: NotebookInstance) {
+function getPublishForNotebookInstance(
+  notebookInstance: NotebookInstance,
+): (event: NotebookPublishEvent) => void {
   const runID = notebookInstance.lastRunID!;
-  return (type: NotebookPublishType, data?: Object) => {
+  return event => {
     notebookInstance.displayPanel.webview.postMessage({
       runID,
-      type,
-      data,
+      type: event.type,
+      data: (event as any).data,
     });
   };
 }
@@ -368,9 +372,9 @@ function getCompiledNotebookFilename(sourceFileName: string) {
 function runCompiledNotebook(
   compiledNotebookFileName: string,
   publish: {
-    onCellUpdate: (data: Object) => void;
+    onCellUpdate: (data: NotebookCellData) => void;
     onOutputError: (error: any) => void;
-    onFinished: (data: {success: boolean; code: number}) => void;
+    onFinished: (data: NotebookRunFinishData) => void;
   },
 ) {
   const spawnedNotebook = spawnCommand(`node ${compiledNotebookFileName}`, {
@@ -388,16 +392,12 @@ function runCompiledNotebook(
   let cellState = 0;
   let bufferPosition = 0;
   let isCellStateInProgress = false;
-  const cellPartsInOrder: Array<'comment' | 'content' | 'result'> = [
+  const cellPartsInOrder: Array<keyof NotebookCellData> = [
     'comment',
     'content',
     'result',
   ];
-  const cellData: {
-    comment?: string;
-    content?: string;
-    result?: string;
-  } = {};
+  const cellData: NotebookCellData = {};
 
   function consume(data: string, {onError}: {onError: () => void}) {
     while (bufferPosition < data.length) {
@@ -424,7 +424,7 @@ function runCompiledNotebook(
           cellPartsInOrder[cellState % tagCount]
         ] = wasCellStateInProgress ? oldData + newData : newData;
       } else {
-        publish.onCellUpdate({cell: cellData});
+        publish.onCellUpdate(cellData);
       }
       bufferPosition = end;
       if (!isCellStateInProgress) {
