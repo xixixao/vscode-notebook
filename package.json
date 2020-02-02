@@ -1,0 +1,55 @@
+{
+  "name": "notebook-vscode",
+  "publisher": "xixixao",
+  "displayName": "notebook",
+  "description": "We'll see about that",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.41.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onCommand:extension.openNotebook"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "extension.openNotebook",
+        "title": "Open Notebook View"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "pretest": "npm run compile",
+    "test": "node ./out/test/runTest.js"
+  },
+  "devDependencies": {
+    "@babel/types": "^7.8.3",
+    "@types/babel-generator": "^6.25.3",
+    "@types/babel-traverse": "^6.25.5",
+    "@types/glob": "^7.1.1",
+    "@types/mocha": "^5.2.7",
+    "@types/node": "^12.11.7",
+    "@types/prettier": "^1.19.0",
+    "@types/vscode": "^1.41.0",
+    "glob": "^7.1.5",
+    "mocha": "^6.2.2",
+    "prettier": "^1.19.1",
+    "tsc-watch": "^4.1.0",
+    "tslint": "^5.20.0",
+    "typescript": "^3.6.4",
+    "vscode-test": "^1.2.2"
+  },
+  "dependencies": {
+    "@babel/parser": "^7.8.3",
+    "@babel/traverse": "^7.8.3",
+    "babel-generator": "^6.26.1",
+    "spawn-command": "0.0.2-1"
+  }
+}
