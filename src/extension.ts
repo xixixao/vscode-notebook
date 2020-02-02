@@ -24,6 +24,11 @@ type NotebookDisposeHandler = (
   ) => vscode.Disposable,
 ) => void;
 
+type NotebookDisplayTemplate = {
+  html: string;
+  scriptPath: vscode.Uri;
+};
+
 // Potentially configurable in the future
 const shouldPreserveFocusWhenOpeningNotebook = true;
 
@@ -71,7 +76,7 @@ function createNotebookRegistry(): NotebookRegistry {
 function registerOpenNotebookCommand(
   notebookRegistry: NotebookRegistry,
   registerExtensionSubscription: (disposable: vscode.Disposable) => void,
-  notebookContentWithPlaceholder: string,
+  notebookContentWithPlaceholder: NotebookDisplayTemplate,
 ) {
   debugLog('[notebook] Activated.');
 
@@ -153,7 +158,7 @@ function getNotebookDisplayPanelTitle(notebookSourceEditor: vscode.TextEditor) {
 function openNewNotebook(
   notebookID: NotebookID,
   notebookSourceEditor: vscode.TextEditor,
-  notebookContentWithPlaceholder: string,
+  notebookContentWithPlaceholder: NotebookDisplayTemplate,
   viewColumn: vscode.ViewColumn,
   disposeHandler: NotebookDisposeHandler,
 ) {
@@ -171,7 +176,7 @@ function openNewNotebook(
 
 function createNotebookDisplay(
   notebookSourceEditor: vscode.TextEditor,
-  notebookContentWithPlaceholder: string,
+  notebookContentWithPlaceholder: NotebookDisplayTemplate,
   viewColumn: vscode.ViewColumn,
 ) {
   const webviewType = 'notebookDisplay'; // TODO: What is this used for?
@@ -187,15 +192,31 @@ function createNotebookDisplay(
       retainContextWhenHidden: true, // Don't kill it when backgrounding
     },
   );
-  panel.webview.html = notebookContentWithPlaceholder;
+  initializeNotebookDisplayWithHTML(
+    panel.webview,
+    notebookContentWithPlaceholder,
+  );
+
   return panel;
+}
+
+function initializeNotebookDisplayWithHTML(
+  displayWebview: vscode.Webview,
+  {html, scriptPath}: NotebookDisplayTemplate,
+) {
+  const scriptUri = displayWebview.asWebviewUri(scriptPath);
+  displayWebview.html = html.replace('webview-script.js', scriptUri.toString());
 }
 
 function getNotebookContentWithPlaceholder(context: vscode.ExtensionContext) {
   const webviewSourceFilePath = context.asAbsolutePath(
     'src/webview-source.html',
   );
-  return fs.readFileSync(webviewSourceFilePath, 'utf8');
+  const scriptPath = vscode.Uri.file(
+    context.asAbsolutePath('src/webview-script.js'),
+  );
+  const html = fs.readFileSync(webviewSourceFilePath, 'utf8');
+  return {html, scriptPath};
 }
 
 function handleNotebookDisplayPanelClosing(
