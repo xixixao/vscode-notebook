@@ -4,8 +4,46 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <style>
-      .__cellContent {
+      #__progressIndicator {
+        position: absolute;
+        top: 0;
+        right: 0;
+      }
+      #__progressIndicator .__success,
+      #__progressIndicator .__error {
+        padding: 8px;
+        color: #444;
+      }
+      #__progressIndicator .__error {
+        color: #c44;
+        background-color: rgba(0, 0, 0, 0.75);
+        font-family: Menlo, Monaco, 'Courier New', monospace;
         white-space: pre;
+      }
+      .__cell {
+        font-size: 15px;
+        padding-bottom: 8px;
+        line-height: 1.5;
+      }
+      .__cellComment,
+      .__cellContent,
+      .__cellResult {
+        padding: 8px;
+      }
+      .__cellComment {
+        white-space: pre-line;
+      }
+      .__cellContent,
+      .__cellResult {
+        /* For now assumes cell result is code */
+        white-space: pre;
+        font-family: Menlo, Monaco, 'Courier New', monospace;
+        font-size: 16px;
+      }
+      .__cellContent {
+        background: rgba(0, 0, 0, 0.2);
+        padding: 8px;
+        color: #999;
       }
     </style>
   </head>

@@ -5,11 +5,7 @@ import {spawn as nodeSpawn, SpawnOptionsWithoutStdio} from 'child_process';
 import {continueStatement} from '@babel/types';
 import * as fs from 'fs';
 
-import {
-  NotebookCellData,
-  NotebookRunFinishData,
-  NotebookPublishEvent,
-} from 'webview/webview-script';
+import {NotebookCellData, NotebookPublishEvent} from 'webview/webview-script';
 
 type NotebookID = string;
 type NotebookRunID = number;
@@ -37,6 +33,8 @@ type NotebookDisplayTemplate = {
 
 // Potentially configurable in the future
 const shouldPreserveFocusWhenOpeningNotebook = true;
+// Potentially configurable in the future
+const shouldRunNotebookWhenOpeningNotebook = true;
 
 export function activate(context: vscode.ExtensionContext) {
   const notebookRegistry = createNotebookRegistry();
@@ -97,7 +95,7 @@ function registerOpenNotebookCommand(
         notebookSourceEditor,
       );
       const notebookID = getNotebookIDForEditor(notebookSourceEditor.document);
-      const notebookInstance = notebookRegistry.lookupNotebookInstance(
+      let notebookInstance = notebookRegistry.lookupNotebookInstance(
         notebookID,
       );
 
@@ -118,6 +116,10 @@ function registerOpenNotebookCommand(
           },
         );
         notebookRegistry.registerNotebookInstance(newNotebookInstance);
+        notebookInstance = newNotebookInstance;
+      }
+      if (shouldRunNotebookWhenOpeningNotebook) {
+        compileAndRunNotebook(notebookInstance, notebookSourceEditor.document);
       }
     }),
   );
@@ -322,13 +324,28 @@ async function compileAndRunNotebook(
       publish({type: 'updateCell', data});
     },
     onOutputError: outputError => {
-      publish({type: 'error', data: {errorType: 'output', error: outputError}});
+      publish({
+        type: 'error',
+        data: {errorType: 'internal', error: outputError},
+      });
     },
-    onFinished: data => {
+    onRuntimeError: runtimeError => {
+      publish({
+        type: 'error',
+        data: {errorType: 'runtime', error: runtimeError},
+      });
+    },
+    onFinishSuccess: () => {
       debugLog(
-        `[notebook] Run of \`${notebookInstance.id}\` finished with code \`${data.code}\``,
+        `[notebook] Finished running notebook \`${notebookInstance.id}\`.`,
       );
-      publish({type: 'finished', data});
+      publish({type: 'finished'});
+    },
+    onFinishError: error => {
+      debugLog(
+        `[notebook] Failed running notebook \`${notebookInstance.id}\`.`,
+      );
+      publish({type: 'error', data: {errorType: 'runtime', error}});
     },
   });
 }
@@ -341,16 +358,34 @@ function getPublishForNotebookInstance(
     notebookInstance.displayPanel.webview.postMessage({
       runID,
       type: event.type,
-      data: (event as any).data,
+      data: formatErrorData(event),
     });
   };
+}
+
+function formatErrorData(event: NotebookPublishEvent) {
+  return event.type === 'error'
+    ? {
+        ...event.data,
+        error: {
+          message: event.data.error.message,
+          stacktrace: event.data.error.stacktrace,
+        },
+      }
+    : (event as any).data;
 }
 
 function compileNotebook(notebookSource: vscode.TextDocument) {
   try {
     return [notebookPackage.compile(notebookSource.getText()), null];
-  } catch (e) {
-    return [null, e];
+  } catch (error) {
+    const formattedError = (error =
+      'loc' in error
+        ? new Error(
+            `Parse error in Notebook source at line ${error.loc.line}, column ${error.loc.column}`,
+          )
+        : error);
+    return [null, formattedError];
   }
 }
 
@@ -373,8 +408,10 @@ function runCompiledNotebook(
   compiledNotebookFileName: string,
   publish: {
     onCellUpdate: (data: NotebookCellData) => void;
-    onOutputError: (error: any) => void;
-    onFinished: (data: NotebookRunFinishData) => void;
+    onOutputError: (error: Error) => void;
+    onRuntimeError: (error: Error) => void;
+    onFinishSuccess: () => void;
+    onFinishError: (error: Error) => void;
   },
 ) {
   const spawnedNotebook = spawnCommand(`node ${compiledNotebookFileName}`, {
@@ -408,7 +445,9 @@ function runCompiledNotebook(
         : data.indexOf(tag, bufferPosition) + tag.length + 1;
       if (start === -1) {
         publish.onOutputError(
-          '[notebook] Could not parse output from running your notebook. This is probably an issue with [notebook]',
+          new Error(
+            '[notebook] Could not parse output from running your notebook. This is probably an issue with [notebook]',
+          ),
         );
         onError();
       }
@@ -423,7 +462,7 @@ function runCompiledNotebook(
         cellData[
           cellPartsInOrder[cellState % tagCount]
         ] = wasCellStateInProgress ? oldData + newData : newData;
-      } else {
+      } else if (!wasCellStateInProgress) {
         publish.onCellUpdate(cellData);
       }
       bufferPosition = end;
@@ -442,8 +481,21 @@ function runCompiledNotebook(
       },
     });
   });
+  let printedErrors = false;
+  spawnedNotebook.stderr.on('data', outputBuffer => {
+    const output = outputBuffer.toString();
+    debugLog(output);
+    publish.onRuntimeError(new Error(output));
+    printedErrors = true;
+  });
   spawnedNotebook.on('close', code => {
-    publish.onFinished({success: code === 0, code});
+    if (!printedErrors) {
+      if (code === 0) {
+        publish.onFinishSuccess();
+      } else {
+        publish.onFinishError(new Error(`Process error code: \`${code}\``));
+      }
+    }
   });
 }
 
