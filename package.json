@@ -39,7 +39,7 @@
     "@types/prettier": "^1.19.0",
     "@types/vscode": "^1.41.0",
     "glob": "^7.1.5",
-    "mocha": "^6.2.2",
+    "mocha": "^10.2.0",
     "prettier": "^1.19.1",
     "tsc-watch": "^4.1.0",
     "tslint": "^5.20.0",
